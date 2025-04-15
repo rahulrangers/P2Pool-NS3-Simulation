@@ -17,7 +17,7 @@ public:
      * @param prevShares 
      */
     Share(uint64_t shareId, uint32_t senderId, time_t timestamp, 
-          const std::vector<uint32_t>& prevShares);
+          const std::vector<uint32_t>& prevShares,uint32_t parentId);
 
     /**
      * Returns the unique ID of the share.
@@ -51,11 +51,17 @@ public:
         return timestamp_ < other.timestamp_;
     }
 
+    /**
+     * Get ParentId which this share connects as part of mainchain.
+     */
+    uint32_t getParentId() const;
+    
 private:
     uint32_t shareId_;                
     uint32_t senderId_;               
     time_t timestamp_;                
     std::vector<uint32_t> prevShares_;   
+    uint32_t parentId;
 };
 
-#endif // SHARE_H
+#endif 

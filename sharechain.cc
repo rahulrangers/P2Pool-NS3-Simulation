@@ -13,10 +13,10 @@ ShareChain::ShareChain(time_t max_time)
 }
 
 void ShareChain::createGenesisShare() {
-    genesisShare_ = new Share(0, 0, 0, std::vector<uint32_t>());
+    genesisShare_ = new Share(1, 0, 0, std::vector<uint32_t>(),0);
     Vertex genesisVertex = boost::add_vertex({genesisShare_}, graph_);
-    shareToVertex_[0] = genesisVertex;
-    ChainTips_[genesisShare_->getShareId()]=1;
+    shareToVertex_[1] = genesisVertex;
+    ChainTips[genesisShare_->getShareId()]=1;
     totalShares_ = 1;
 }
 
@@ -27,13 +27,13 @@ bool ShareChain::addShare(Share* share) {
     if (shareToVertex_.find(shareId) != shareToVertex_.end()) return false; 
     
     if (!validatePrevRefs(share)) {
-        pendingShares_[shareId] = share;
+        pendingShares[shareId] = share;
         return false;
     }
     
+    totalShares_++;
     Vertex newVertex = boost::add_vertex({share}, graph_);
     shareToVertex_[shareId] = newVertex;
-    totalShares_++;
     
     for (uint32_t prevId : share->getPrevRefs()) {
             if (shareToVertex_.find(prevId) != shareToVertex_.end()) {
@@ -42,25 +42,26 @@ bool ShareChain::addShare(Share* share) {
             }
     }
     
-    updateMainChain(share, newVertex);
+    updateChainTips(share, newVertex);
     processPendingShares();
     
     return true;
 }
 
 const std::unordered_map<uint32_t,uint32_t> ShareChain::getChainTips() const {
-    return ChainTips_;
+    return ChainTips;
 }
 
-size_t ShareChain::getOrphanCount() const {
-    uint32_t maxi=0;
-    for(std::pair<uint32_t,uint32_t> i : ChainTips_) maxi=std::max(maxi,i.second);
-    return  totalShares_- maxi;
+size_t ShareChain::getOrphanCount() {
+    uint32_t uncleBlocks = getUncleBlocks(); 
+    uint32_t mainchainblocks = MainChainLength();
+    return  totalShares_ - uncleBlocks - mainchainblocks; 
 }
 
 size_t ShareChain::getTotalShares() const {
     return totalShares_;
 }
+
 void ShareChain::setmaxtimestamp(time_t maxtime) {
      max_share_timestamp = maxtime;
 }
@@ -100,13 +101,13 @@ uint32_t ShareChain::calculateSubtreeWeight(Vertex v) {
     return visited.size();
 }
 
-void ShareChain::updateMainChain(Share* share, Vertex vertex) {
+void ShareChain::updateChainTips(Share* share, Vertex vertex) {
     int weight = calculateSubtreeWeight(vertex);
     for (uint32_t prevId : share->getPrevRefs()) {
-        if(ChainTips_.find(prevId)!=ChainTips_.end())
-        ChainTips_.erase(prevId);
+        if(ChainTips.find(prevId)!=ChainTips.end())
+        ChainTips.erase(prevId);
     }
-    ChainTips_[share->getShareId()] = weight;
+    ChainTips[share->getShareId()] = weight;
 }
 
 bool ShareChain::validatePrevRefs(const Share* share) const {
@@ -121,13 +122,50 @@ bool ShareChain::validatePrevRefs(const Share* share) const {
     return true;
 }
 
+uint32_t ShareChain::getBestTip() {
+    uint32_t max_weight=0;
+    uint32_t chosen_tip=0;
+    for(std::pair<uint32_t,uint32_t> i : ChainTips) {
+        if(max_weight < i.second) {
+            max_weight=i.second;
+            chosen_tip = i.first;
+        }
+    }
+    return chosen_tip;
+}
+
+uint32_t ShareChain::MainChainLength() {
+    uint32_t chosen_tip = getBestTip();
+    uint32_t chain_length=1;
+    Share* mainShare = graph_[shareToVertex_[chosen_tip]].share;
+    while(mainShare->getShareId()!=1){
+    uint32_t parentid = mainShare->getParentId();
+    chain_length +=1;
+    mainShare =  graph_[shareToVertex_[parentid]].share;
+    }
+    return chain_length;
+}
+
+
+uint32_t ShareChain::getUncleBlocks() {
+    uint32_t chosen_tip = getBestTip();
+    uint32_t UncleBlocks=0;
+    Share* mainShare = graph_[shareToVertex_[chosen_tip]].share;
+    while(mainShare->getShareId()!=1){
+    uint32_t parentid = mainShare->getParentId();
+    UncleBlocks +=(mainShare->getPrevRefs().size()-1);
+    mainShare =  graph_[shareToVertex_[parentid]].share;
+    }
+    return UncleBlocks;
+}
+
 void ShareChain::processPendingShares() {
     bool progress = true;
     std::vector<uint32_t> processed;
     while (progress) {
         progress = false;
         processed.clear();
-        for (auto& pair : pendingShares_) {
+        for (auto& pair : pendingShares) {
             Share* pendingShare = pair.second;
             if (addShare(pendingShare)) {
                 processed.push_back(pair.first);
@@ -135,7 +173,7 @@ void ShareChain::processPendingShares() {
             }
         }
         for (uint32_t id : processed) {
-            pendingShares_.erase(id);
+            pendingShares.erase(id);
         }
     }
 }

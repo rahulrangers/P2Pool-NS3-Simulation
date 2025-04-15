@@ -4,8 +4,8 @@
 #include <cstdint>
 
 Share::Share(uint64_t shareId, uint32_t senderId, time_t timestamp, 
-    const std::vector<uint32_t>& prevShares)
-: shareId_(shareId), senderId_(senderId), timestamp_(timestamp), prevShares_(prevShares) {}
+    const std::vector<uint32_t>& prevShares, uint32_t parId)
+: shareId_(shareId), senderId_(senderId), timestamp_(timestamp), prevShares_(prevShares) , parentId(parId) {}
 
 uint32_t Share::getSenderId() const {
     return senderId_;
@@ -24,4 +24,8 @@ time_t Share::getTimestamp() const{
 
 void Share::addPrevRef(uint32_t shareid) {
         prevShares_.push_back(shareid);
+}
+
+uint32_t Share::getParentId() const {
+  return parentId;
 }

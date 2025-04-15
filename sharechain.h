@@ -53,7 +53,7 @@ public:
      * Gets the count of orphaned shares (shares not in the main chain)
      * @return Number of orphaned shares
      */
-    size_t getOrphanCount() const;
+    size_t getOrphanCount() ;
     
     /**
      * Gets the total number of shares in the chain
@@ -86,10 +86,10 @@ private:
     std::unordered_map<uint32_t, Vertex> shareToVertex_;
     
     // Current tipsID of the sharechain with their weights 
-    std::unordered_map<uint32_t,uint32_t>  ChainTips_;
+    std::unordered_map<uint32_t,uint32_t>  ChainTips;
     
     // Pending shares that couldn't be added due to missing previous references
-    std::unordered_map<uint32_t, Share*> pendingShares_;
+    std::unordered_map<uint32_t, Share*> pendingShares;
     
     // Genesis share
     Share* genesisShare_;
@@ -112,14 +112,7 @@ private:
      * @param share Newly added share
      * @param vertex Vertex of the newly added share
      */
-    void updateMainChain(Share* share, Vertex vertex);
-    
-    /**
-     * Marks a path from a given vertex to genesis as part of the main chain
-     * @param v Starting vertex
-     */
-    void markMainChainPath(Vertex v);
-    
+    void updateChainTips(Share* share, Vertex vertex);
     /**
      * Validates that all previous shares referenced by a share exist in the graph
      * @param share Share to validate
@@ -133,9 +126,24 @@ private:
     void processPendingShares();
     
     /**
+     *Traverse through mainchain and finds uncleBlocks
+     */
+    uint32_t getUncleBlocks() ;
+
+    /**
      * Creates and adds the genesis share to the chain
      */
     void createGenesisShare();
+
+    /**
+     * Gets tip with heaviest Subtree
+     */
+    uint32_t getBestTip();
+
+     /**
+     * Gets mainchain length
+     */
+    uint32_t MainChainLength();
 };
 
 #endif 

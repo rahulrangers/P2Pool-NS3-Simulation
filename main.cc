@@ -12,13 +12,13 @@
 using namespace ns3;
 
 int main(int argc, char *argv[]) {
-  uint32_t numNodes = 10;
+  uint32_t numNodes = 50;
   double meanLatency = 0.5;        
   double latencyVariance = 0.1;    
   double shareGenMean = 1.0;       
   double shareGenVariance = 0.5;    
-  uint32_t maxTipsToReference = 3; 
-  uint32_t simDuration = 100;       
+  uint32_t maxTipsToReference = 100; 
+  uint32_t simDuration = 100000000;       
 
 
   LogComponentEnable("P2PManager", LOG_LEVEL_INFO);

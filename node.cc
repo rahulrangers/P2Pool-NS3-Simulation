@@ -188,7 +188,7 @@ void P2PoolNode::StartShareGeneration(double interval)
     m_nextShareEvent = Simulator::Schedule(Simulator::Now() + Seconds(delay),
                                            &P2PoolNode::GenerateAndBroadcastShare,
                                            this);
-    NS_LOG_INFO("Node " << m_nodeId << " scheduled first share in " << delay << " seconds");
+  //  NS_LOG_INFO("Node " << m_nodeId << " scheduled first share in " << delay << " seconds");
 }
 
 void P2PoolNode::StopShareGeneration()
@@ -214,6 +214,7 @@ void P2PoolNode::PrintChainStats() const
     std::cout << "  - Shares received: " << m_sharesReceived << std::endl;
     std::cout << "  - Shares sent: " << m_sharesSent << std::endl;
     std::cout << "  - Orphan count: " << m_shareChain->getOrphanCount() << std::endl;
+    std::cout << "  - Total Shares: " << m_shareChain->getTotalShares() << std::endl;
 }
 
 void P2PoolNode::GenerateAndBroadcastShare()
@@ -223,7 +224,7 @@ void P2PoolNode::GenerateAndBroadcastShare()
     std::unordered_map<uint32_t, uint32_t> tips = m_shareChain->getChainTips();
     std::vector<std::pair<uint32_t, int>> sortedtips(tips.begin(), tips.end());
     std::vector<uint32_t> tipShares;
-
+    
     std::sort(sortedtips.begin(), sortedtips.end(), [](const auto& a, const auto& b) {
         return a.second > b.second;
     });
@@ -234,8 +235,8 @@ void P2PoolNode::GenerateAndBroadcastShare()
     }
     time_t now = std::time(nullptr);
     uint32_t uniqueshareid = GenerateUniqueShareId();
-    Share* newShare = new Share(uniqueshareid, m_nodeId, now, tipShares);
-    NS_LOG_INFO(newShare->getTimestamp() << "checking  " << maxTime);
+    Share* newShare = new Share(uniqueshareid, m_nodeId, now, tipShares,sortedtips[0].first);
+    NS_LOG_INFO("noOfTips "<<sortedtips.size());
     m_shareChain->addShare(newShare);
     m_sharesCreated++;
     NS_LOG_INFO("Node " << m_nodeId << " created share " << newShare->getShareId());
@@ -260,10 +261,10 @@ void P2PoolNode::ScheduleNextShareGeneration()
     m_nextShareEvent = Simulator::Schedule(Simulator::Now() + Seconds(nextTime),
                                            &P2PoolNode::GenerateAndBroadcastShare,
                                            this);
-    NS_LOG_INFO("Node " << m_nodeId << " scheduled next share in " << nextTime
-                        << " seconds "
-                           "currentime "
-                        << Simulator::Now().GetSeconds());
+    // NS_LOG_INFO("Node " << m_nodeId << " scheduled next share in " << nextTime
+    //                     << " seconds "
+    //                        "currentime "
+    //                     << Simulator::Now().GetSeconds());
 }
 
 void P2PoolNode::BroadcastShare(Share* share)
@@ -278,8 +279,8 @@ void P2PoolNode::BroadcastShare(Share* share)
                             this,
                             share,
                             peer.first);
-        NS_LOG_INFO("Node " << m_nodeId << " scheduled share " << share->getShareId()
-                            << " to be sent in " << delay << " seconds");
+        // NS_LOG_INFO("Node " << m_nodeId << " scheduled share " << share->getShareId()
+        //                     << " to be sent in " << delay << " seconds");
     }
 }
 
@@ -298,8 +299,8 @@ void P2PoolNode::SendShareToPeer(Share* share, Address peerAddress)
         Create<Packet>((uint8_t*)serializedShare.c_str(), serializedShare.size() + 1);
     it->second->Send(packet);
 
-    NS_LOG_INFO("Node " << m_nodeId << " sent share " << share->getShareId() << " to peer at "
-                        << peerAddress);
+    // NS_LOG_INFO("Node " << m_nodeId << " sent share " << share->getShareId() << " to peer at "
+    //                     << peerAddress);
 }
 
 void P2PoolNode::HandleReceivedShare(Ptr<Socket> socket)
@@ -319,12 +320,11 @@ void P2PoolNode::HandleReceivedShare(Ptr<Socket> socket)
         Share* receivedShare = DeserializeShare(data);
         if (receivedShare)
         {
-            NS_LOG_INFO(receivedShare->getTimestamp() << "checking  " << maxTime);
             m_shareChain->addShare(receivedShare);
             m_sharesReceived++;
 
-            NS_LOG_INFO("Node " << m_nodeId << " received share " << receivedShare->getShareId()
-                                << " from node " << receivedShare->getSenderId());
+            // NS_LOG_INFO("Node " << m_nodeId << " received share " << receivedShare->getShareId()
+            //                     << " from node " << receivedShare->getSenderId());
         }
     }
 }
@@ -356,6 +356,7 @@ std::string P2PoolNode::SerializeShare(Share* share)
     ss << share->getShareId() << "|";
     ss << share->getSenderId() << "|";
     ss << share->getTimestamp() << "|";
+    ss << share->getParentId()<< "|";
 
     const std::vector<uint32_t>& prevRefs = share->getPrevRefs();
     ss << prevRefs.size() << "|";
@@ -381,7 +382,7 @@ Share* P2PoolNode::DeserializeShare(const std::string& data)
     {
         tokens.push_back(token);
     }
-    if (tokens.size() < 4)
+    if (tokens.size() < 5)
     {
         return nullptr;
     }
@@ -391,13 +392,14 @@ Share* P2PoolNode::DeserializeShare(const std::string& data)
         uint32_t shareId = std::stoul(tokens[0]);
         uint32_t senderId = std::stoul(tokens[1]);
         time_t timestamp = std::stoll(tokens[2]);
-        uint32_t numRefs = std::stoul(tokens[3]);
+        uint32_t parentId = std::stoll(tokens[3]);
+        uint32_t numRefs = std::stoul(tokens[4]);
 
         std::vector<uint32_t> prevRefs;
 
-        if (tokens.size() > 4 && numRefs > 0)
+        if (tokens.size() > 5 && numRefs > 0)
         {
-            std::stringstream refSs(tokens[4]);
+            std::stringstream refSs(tokens[5]);
             std::string refToken;
 
             while (std::getline(refSs, refToken, ','))
@@ -409,7 +411,7 @@ Share* P2PoolNode::DeserializeShare(const std::string& data)
                 }
             }
         }
-        return new Share(shareId, senderId, timestamp, prevRefs);
+        return new Share(shareId, senderId, timestamp, prevRefs,parentId);
     }
     catch (const std::exception& e)
     {
