@@ -10,6 +10,8 @@
 #include <memory>
 #include <utility>
 #include "share.h"
+#include "ns3/simulator.h"
+
 
 /**
  * Class to represent the ShareChain in the P2Pool network
@@ -35,7 +37,7 @@ public:
     /**
      * Constructor to initialize a ShareChain with a genesis node
      */
-    ShareChain(time_t max_time);
+    ShareChain(ns3::Time max_time);
     /**
      * Adds a share to the chain
      * @param share Pointer to the share to be added
@@ -53,7 +55,7 @@ public:
      * Gets the count of orphaned shares (shares not in the main chain)
      * @return Number of orphaned shares
      */
-    size_t getOrphanCount() const;
+    size_t getOrphanCount() ;
     
     /**
      * Gets the total number of shares in the chain
@@ -76,29 +78,44 @@ public:
      * Gets maxtimestamp
      * @return return maxtimestamp
      */
-    void setmaxtimestamp(time_t maxtime) ;
+    void setmaxtimestamp(ns3::Time maxtime) ;
+
+    /**
+     * Gets mainchain length
+    */
+    uint32_t MainChainLength();
+
+    /**
+     *Traverse through mainchain and finds uncleBlocks
+    */
+    uint32_t getUncleBlocks();
+
+    /**
+     *Traverse through mainchain and returns shares of mainchain
+    */
+    std::vector<uint32_t> showchain();
 
 private:
     // The graph that stores our DAG of shares
-    ShareGraph graph_;
+    ShareGraph graph;
     
     // Maps share IDs to their vertices in the graph
-    std::unordered_map<uint32_t, Vertex> shareToVertex_;
+    std::unordered_map<uint32_t, Vertex> shareToVertex;
     
     // Current tipsID of the sharechain with their weights 
-    std::unordered_map<uint32_t,uint32_t>  ChainTips_;
+    std::unordered_map<uint32_t,uint32_t>  ChainTips;
     
     // Pending shares that couldn't be added due to missing previous references
-    std::unordered_map<uint32_t, Share*> pendingShares_;
+    std::unordered_map<uint32_t, Share*> pendingShares;
     
     // Genesis share
-    Share* genesisShare_;
+    Share* genesisShare;
     
     // Total number of shares in the chain
-    size_t totalShares_;
+    size_t totalShares;
     
     //share's maxiumum timestamp limit
-    time_t max_share_timestamp;
+    ns3::Time max_share_timestamp;
     
     /**
      * Calculates the weight of a subtree (number of nodes from this share to genesis)
@@ -112,14 +129,7 @@ private:
      * @param share Newly added share
      * @param vertex Vertex of the newly added share
      */
-    void updateMainChain(Share* share, Vertex vertex);
-    
-    /**
-     * Marks a path from a given vertex to genesis as part of the main chain
-     * @param v Starting vertex
-     */
-    void markMainChainPath(Vertex v);
-    
+    void updateChainTips(Share* share, Vertex vertex);
     /**
      * Validates that all previous shares referenced by a share exist in the graph
      * @param share Share to validate
@@ -136,6 +146,13 @@ private:
      * Creates and adds the genesis share to the chain
      */
     void createGenesisShare();
+
+    /**
+     * Gets tip with heaviest Subtree
+     */
+    uint32_t getBestTip();
+
+
 };
 
 #endif 

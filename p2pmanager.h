@@ -11,6 +11,7 @@
 #include "ns3/random-variable-stream.h"
 
 #include <iostream>
+#include <utility>
 #include <map>
 #include <memory>
 #include <string>
@@ -25,40 +26,30 @@ class P2PManager
      * Constructor to initialize the P2PManager with simulation parameters.
      *
      * @param numNodes Number of nodes in the network.
-     * @param meanLatency Mean network latency between nodes.
-     * @param latencyVariance Variance in network latency.
      * @param shareGenMean Mean interval for share generation.
      * @param shareGenVariance Variance in share generation interval.
      * @param maxTipsToReference Maximum number of tips a new share can reference.
      * @param simulationDuration Duration of the simulation in seconds.
+     * @param maxTimeStamp share with maxtimestamp which can be added to sharechain
      */
     P2PManager(uint32_t numNodes,
-               double meanLatency,
-               double latencyVariance,
                double shareGenMean,
                double shareGenVariance,
                uint32_t maxTipsToReference,
-               uint32_t simulationDuration);
+               uint32_t simulationDuration,
+               Time maxTimeStamp);
 
     /**
      * Sets up the simulation environment including node creation,
      * network setup, and initial configuration.
      */
-    void Configure();
+    void CreateRandomTopology(double connectionProbability = 0.3, double latency = 5.0);
 
     /**
      * Runs the simulation for the specified duration.
      */
     void Run();
-
-    /**
-     * Establishes point-to-point connections between all nodes,
-     * and records the IP addresses mapped to each node.
-     *
-     * @param nodeToAddresses Mapping of node IDs to their assigned IP addresses.
-     */
-    void SetupAllConnections(std::map<uint32_t, std::vector<Ipv4Address>>& nodeToAddresses);
-
+    
     /**
      * Prints out the results/statistics of the simulation after execution.
      */
@@ -66,27 +57,45 @@ class P2PManager
 
   private:
     
-    uint32_t m_numNodes;
-    double m_meanLatency;
-    double m_latencyVariance;
-    double m_shareGenMean;
-    double m_shareGenVariance;
-    uint32_t m_maxTipsToReference;
-    uint32_t m_simulationDuration;
+    uint32_t numNodes;
+    double shareGenMean;
+    double shareGenVariance;
+    uint32_t maxTipsToReference;
+    uint32_t simulationDuration;
+    NodeContainer nodes;
+    std::vector<Ptr<P2PoolNode>> p2pNodes;
+    std::vector<Ipv4Address> nodeAddresses;
+    Ipv4AddressHelper addressHelper;
+    InternetStackHelper internet;
+    Time maxTime;
+    struct ConnectionInfo
+    {
+        NetDeviceContainer devices;
+        Ptr<PointToPointChannel> channel;
+        Ipv4InterfaceContainer ifc;
+    };
 
-    NodeContainer m_nodes;
-    std::vector<Ptr<P2PoolNode>> m_p2pNodes;
-    std::vector<Ipv4Address> m_nodeAddresses;
-    NetDeviceContainer m_devices;
-    InternetStackHelper m_internet;
-
+    std::map<std::pair<uint32_t, uint32_t>, ConnectionInfo> connections;
+     
     /**
-     * Creates a random variable model for latency for a specific node.
-     *
-     * @param nodeId ID of the node.
-     * @return A pointer to a RandomVariableStream modeling latency.
+      * Each peer starts generating shares
      */
-    Ptr<RandomVariableStream> CreateLatencyModel(uint32_t nodeId);
+    void startGeneratingShares();
+
+     /**
+     * Creates a TCP connection for each link in the connections.
+     */
+    void makeconnections();
+    
+    /**
+    * Creates a links between i and j using pointtopoint Helper
+    */
+    void ConnectNodes(uint32_t i, uint32_t j, double latencyMs);
+    
+    /**
+    * Creates a TCP connection for i and j.
+    */
+    void ConnectPeerSockets(uint32_t i, uint32_t j);
 
     /**
      * Creates a normal distribution model for share generation interval.

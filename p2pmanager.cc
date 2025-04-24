@@ -1,163 +1,202 @@
-#include "ns3/core-module.h"
-#include "ns3/network-module.h"
-#include "ns3/internet-module.h"
-#include "ns3/point-to-point-module.h"
-#include "ns3/applications-module.h"
-#include "ns3/mobility-module.h"
-#include "ns3/config-store-module.h"
-#include "ns3/random-variable-stream.h"
-#include "ns3/log.h"
 #include "p2pmanager.h"
 
+#include "ns3/applications-module.h"
+#include "ns3/config-store-module.h"
+#include "ns3/core-module.h"
+#include "ns3/internet-module.h"
+#include "ns3/log.h"
+#include "ns3/mobility-module.h"
+#include "ns3/network-module.h"
+#include "ns3/point-to-point-module.h"
+#include "ns3/random-variable-stream.h"
 
-#include <vector>
-#include <map>
-#include <string>
+#include <cmath>
 #include <iostream>
+#include <map>
 #include <memory>
+#include <random>
+#include <string>
+#include <vector>
 
 NS_LOG_COMPONENT_DEFINE("P2PManager");
 
 using namespace ns3;
 
-P2PManager::P2PManager(uint32_t numNodes, double meanLatency, double latencyVariance,
-                       double shareGenMean, double shareGenVariance,
-                       uint32_t maxTipsToReference, uint32_t simulationDuration)
-    : m_numNodes(numNodes),
-      m_meanLatency(meanLatency),
-      m_latencyVariance(latencyVariance),
-      m_shareGenMean(shareGenMean),
-      m_shareGenVariance(shareGenVariance),
-      m_maxTipsToReference(maxTipsToReference),
-      m_simulationDuration(simulationDuration) {
-    NS_LOG_FUNCTION(this << numNodes << meanLatency << latencyVariance << shareGenMean
-                         << shareGenVariance << maxTipsToReference << simulationDuration);
+P2PManager::P2PManager(uint32_t numNodes,
+                       double shareGenMean,
+                       double shareGenVariance,
+                       uint32_t maxTipsToReference,
+                       uint32_t simulationDuration,
+                       Time maxTimeStamp)
+    : numNodes(numNodes),
+      shareGenMean(shareGenMean),
+      shareGenVariance(shareGenVariance),
+      maxTipsToReference(maxTipsToReference),
+      simulationDuration(simulationDuration),
+      maxTime(maxTimeStamp)
+{
+    nodes.Create(numNodes);
+    internet.Install(nodes);
+    addressHelper.SetBase("10.1.0.0", "255.255.255.0");
+    NS_LOG_FUNCTION(this << numNodes << shareGenMean << shareGenVariance << maxTipsToReference
+                         << simulationDuration);
     LogComponentEnable("P2PManager", LOG_LEVEL_INFO);
 }
 
-void P2PManager::Configure() {
-    NS_LOG_FUNCTION(this);
+    
+void P2PManager::CreateRandomTopology(double connectionProbability, double latency)
+    {
+        NS_LOG_FUNCTION(this);
+        std::random_device rd;
+        std::mt19937 rng(rd());
+        std::uniform_real_distribution<double> dist(0.0, 1.0);
+        for (uint32_t i = 0; i < numNodes; i++)
+        {
+            bool connected = false;
+            for (uint32_t j = i + 1; j < numNodes; j++)
+            {
+                if (dist(rng) < connectionProbability)
+                {
+                    connected = true;
+                    ConnectNodes(i, j, latency);
+                }
+            }
 
-    m_nodes.Create(m_numNodes);
-    
-    InternetStackHelper internet;
-    internet.Install(m_nodes);
-    
-    PointToPointHelper p2p;
-    p2p.SetDeviceAttribute("DataRate", StringValue("5Mbps"));
-    p2p.SetChannelAttribute("Delay", StringValue("2ms"));
-    
-    uint32_t subnetCount = 1;
-    std::map<uint32_t, std::vector<Ipv4Address>> nodeToAddresses;
-    
-    for (uint32_t i = 0; i < m_numNodes; ++i) {
-        for (uint32_t j = i + 1; j < m_numNodes; ++j) {
-            NodeContainer nodeContainer;
-            nodeContainer.Add(m_nodes.Get(i));
-            nodeContainer.Add(m_nodes.Get(j));
+            if (!connected)
+            {
+                if (i == 0 && numNodes > 0)
+                {
+                    ConnectNodes(0, 1, latency);
+                }
+                else
+                {
+                    ConnectNodes(i, i - 1, latency);
+                }
+            }
+        }
 
-            NetDeviceContainer link = p2p.Install(nodeContainer);
-            
-            Ipv4AddressHelper ipv4;
-            std::ostringstream subnet;
-            uint32_t firstOctet = 10;
-            uint32_t secondOctet = (subnetCount / 256) % 256; 
-            uint32_t thirdOctet  = subnetCount % 256;           
-            subnet << firstOctet << "." << secondOctet << "." << thirdOctet << ".0";
-            ipv4.SetBase(subnet.str().c_str(), "255.255.255.0");
-            
-            Ipv4InterfaceContainer interfaces = ipv4.Assign(link);
-            
-            uint32_t nodeId1 = m_nodes.Get(i)->GetId();
-            nodeToAddresses[nodeId1].push_back(interfaces.GetAddress(0));
-            
-            uint32_t nodeId2 = m_nodes.Get(j)->GetId();
-            nodeToAddresses[nodeId2].push_back(interfaces.GetAddress(1));
-            subnetCount++;
+        for (uint32_t i = 0; i < numNodes; ++i)
+        {
+            Ptr<NormalRandomVariable> shareGenModel = CreateShareGenTimeModel(i);
+            Ptr<P2PoolNode> p2pNode = Create<P2PoolNode>(i, shareGenModel, maxTipsToReference, maxTime);
+            nodes.Get(i)->AddApplication(p2pNode);
+            p2pNode->SetStartTime(Seconds(0.0));
+            p2pNode->SetStopTime(Seconds(simulationDuration + 1.0));
+            p2pNodes.push_back(p2pNode);
+        }
+        Ipv4GlobalRoutingHelper::PopulateRoutingTables();
+
+        Simulator::Schedule(Seconds(5) + Simulator::Now(), &P2PManager::makeconnections, this);
+
+        NS_LOG_INFO("Network configured with " << latency << " lactency");
+    }
+
+    
+void P2PManager::makeconnections()
+    {
+        for (const auto& connection : connections)
+        {
+            uint32_t i = connection.first.first;
+            uint32_t j = connection.first.second;
+            ConnectPeerSockets(i, j);
+        }
+        startGeneratingShares();
+    }
+
+   
+void P2PManager::startGeneratingShares()
+    {
+        for (auto& node : p2pNodes)
+        {
+            node->ScheduleNextShareGeneration();
         }
     }
+
     
-    Ipv4GlobalRoutingHelper::PopulateRoutingTables();
-    time_t now = time(nullptr);
-    time_t maxTime = now + m_simulationDuration / 4;
-    
-    for (uint32_t i = 0; i < m_numNodes; ++i) {
-        Ptr<RandomVariableStream> latencyModel = CreateLatencyModel(i);
-        Ptr<NormalRandomVariable> shareGenModel = CreateShareGenTimeModel(i);
-        Ptr<P2PoolNode> p2pNode = Create<P2PoolNode>(i, shareGenModel, latencyModel,
-                                                     m_maxTipsToReference, maxTime);
-        m_nodes.Get(i)->AddApplication(p2pNode);
-        p2pNode->SetStartTime(Seconds(0.0));
-        p2pNode->SetStopTime(Seconds(m_simulationDuration + 1.0));
-        m_p2pNodes.push_back(p2pNode);
-    }
-    
-    Simulator::Schedule(Seconds(5) + Simulator::Now(), &P2PManager::SetupAllConnections, this, nodeToAddresses);
-    
-    NS_LOG_INFO("Network configured with " << m_numNodes << " nodes");
-}
+void P2PManager::ConnectNodes(uint32_t i, uint32_t j, double latencyMs)
+    {
+        PointToPointHelper p2pHelper;
+        p2pHelper.SetDeviceAttribute("DataRate", StringValue("5Mbps"));
+        p2pHelper.SetChannelAttribute("Delay", TimeValue(MilliSeconds(latencyMs)));
 
+        NodeContainer linkNodes;
+        linkNodes.Add(nodes.Get(i));
+        linkNodes.Add(nodes.Get(j));
 
-void P2PManager::SetupAllConnections(std::map<uint32_t, std::vector<Ipv4Address>> &nodeToAddresses) {
-    NS_LOG_INFO("Setting up all connections at " << Simulator::Now().GetSeconds() << "s");
-    for (uint32_t i = 0; i < m_numNodes; ++i) {
-        m_p2pNodes[i]->SetupConnections(m_p2pNodes, nodeToAddresses, 9333);
+        NetDeviceContainer linkDevices = p2pHelper.Install(linkNodes);
 
-}
-}
+        Ipv4InterfaceContainer ifc = addressHelper.Assign(linkDevices);
+        addressHelper.NewNetwork();
 
-void P2PManager::Run() {
-    NS_LOG_FUNCTION(this);
+        ConnectionInfo connInfo;
+        connInfo.devices = linkDevices;
+        connInfo.channel = linkDevices.Get(0)->GetChannel()->GetObject<PointToPointChannel>();
+        connInfo.ifc = ifc;
 
-    NS_LOG_INFO("Starting simulation for " << m_simulationDuration << " seconds");
-    Simulator::Schedule(Seconds(100), [](){
-        NS_LOG_INFO("Dummy event reached at 1000 seconds.");
-    });
-    Simulator::Stop(Seconds(m_simulationDuration));
-    Simulator::Run();
-    Simulator::Destroy();
-    NS_LOG_INFO("Simulation completed");
-}
-
-void P2PManager::PrintResults() {
-    NS_LOG_FUNCTION(this);
-
-    std::cout << "=== P2Pool Simulation Results ===" << std::endl;
-    uint32_t totalOrphans = 0;
-
-    for (uint32_t i = 0; i < m_numNodes; ++i) {
-        m_p2pNodes[i]->PrintChainStats();
-        totalOrphans += m_p2pNodes[i]->getOrphanCount();
+        connections[std::make_pair(i, j)] = connInfo;
     }
 
-    std::cout << "Average orphans per node: " << (double)totalOrphans / m_numNodes << std::endl;
-}
+    
+void P2PManager::ConnectPeerSockets(uint32_t i, uint32_t j)
+    {
+        auto& conn = connections[{i, j}];
+        Ipv4Address addrJ = conn.ifc.GetAddress(1);
 
-Ptr<RandomVariableStream> P2PManager::CreateLatencyModel(uint32_t nodeId) {
-    double nodeFactor = 0.8 + (nodeId % 5) * 0.1;
-    double mean = m_meanLatency * nodeFactor;
-    double variance = m_latencyVariance * nodeFactor;
+        Ptr<Socket> socket = Socket::CreateSocket(nodes.Get(i), TcpSocketFactory::GetTypeId());
 
-    Ptr<NormalRandomVariable> latencyModel = CreateObject<NormalRandomVariable>();
-    latencyModel->SetAttribute("Mean", DoubleValue(mean));
-    latencyModel->SetAttribute("Variance", DoubleValue(variance));
+        socket->Connect(InetSocketAddress(addrJ, j + 1000));
 
-    NS_LOG_INFO("Created latency model for node " << nodeId << " with mean="
-                << mean << ", variance=" << variance);
-    return latencyModel;
-}
+        socket->SetRecvCallback(MakeCallback(&P2PoolNode::HandleReceivedShare, p2pNodes[i]));
+        NS_LOG_INFO("connection " << i << ' ' << j << ' ' << addrJ);
+        p2pNodes[i]->AddPeerSocket(j, socket);
+        std::string reg = "REGISTER:" + std::to_string(i);
+        Ptr<Packet> packet =
+            Create<Packet>(reinterpret_cast<const uint8_t*>(reg.c_str()), reg.length() + 1);
+        socket->Send(packet);
+    }
 
-Ptr<NormalRandomVariable> P2PManager::CreateShareGenTimeModel(uint32_t nodeId) {
-    double hashPowerFactor = 0.5 + ((nodeId * 7919) % 100) / 100.0;
-    double mean = m_shareGenMean / hashPowerFactor;
-    double variance = m_shareGenVariance / hashPowerFactor;
+    
+void P2PManager::Run()
+    {
+        NS_LOG_FUNCTION(this);
 
-    Ptr<NormalRandomVariable> shareGenModel = CreateObject<NormalRandomVariable>();
-    shareGenModel->SetAttribute("Mean", DoubleValue(mean));
-    shareGenModel->SetAttribute("Variance", DoubleValue(variance));
+        NS_LOG_INFO("Starting simulation for " << simulationDuration << " seconds");
+        Simulator::Stop(Seconds(simulationDuration));
+        Simulator::Run();
+        Simulator::Destroy();
+        NS_LOG_INFO("Simulation completed");
+    }
 
-    NS_LOG_INFO("Created share generation model for node " << nodeId << " with mean="
-                << mean << ", variance=" << variance << " (hash power factor: "
-                << hashPowerFactor << ")");
-    return shareGenModel;
-}
+    
+void P2PManager::PrintResults()
+    {
+        NS_LOG_FUNCTION(this);
+
+        std::cout << "=== P2Pool Simulation Results ===" << std::endl;
+        uint32_t totalOrphans = 0;
+
+        for (uint32_t i = 0; i < numNodes; ++i)
+        {
+            p2pNodes[i]->PrintChainStats();
+            totalOrphans += p2pNodes[i]->getOrphanCount();
+        }
+
+        std::cout << "Average orphans per node: " << (double)totalOrphans / numNodes << std::endl;
+    }
+
+   
+Ptr<NormalRandomVariable> P2PManager::CreateShareGenTimeModel(uint32_t nodeId)
+    {
+        double hashPowerFactor = 0.5 + ((nodeId * 7919) % 100) / 100.0;
+        double mean = shareGenMean / hashPowerFactor;
+        double variance = shareGenVariance / hashPowerFactor;
+
+        Ptr<NormalRandomVariable> shareGenModel = CreateObject<NormalRandomVariable>();
+        shareGenModel->SetAttribute("Mean", DoubleValue(mean));
+        shareGenModel->SetAttribute("Variance", DoubleValue(variance));
+
+        NS_LOG_INFO("Created share generation model for node "
+                    << nodeId << " with mean=" << mean << ", variance=" << variance
+                    << " (hash power factor: " << hashPowerFactor << ")");
+        return shareGenModel;
+    }

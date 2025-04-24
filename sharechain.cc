@@ -1,76 +1,84 @@
 #include <iostream>
 #include "sharechain.h"
-#include <boost/graph/breadth_first_search.hpp>
-#include <boost/graph/dijkstra_shortest_paths.hpp>
 #include <algorithm>
 #include <queue>
+#include "ns3/simulator.h"
+#include "ns3/log.h"
+#include <boost/graph/graphviz.hpp>
 #include <unordered_set>
 #include <limits>
+#include <filesystem> 
+namespace fs = std::filesystem;
 
-ShareChain::ShareChain(time_t max_time) 
-    : totalShares_(0), genesisShare_(nullptr), max_share_timestamp(max_time) {
+NS_LOG_COMPONENT_DEFINE("ShareChain");
+
+ShareChain::ShareChain(ns3::Time max_time) 
+    : totalShares(0), genesisShare(nullptr), max_share_timestamp(max_time) {
     createGenesisShare();
 }
 
 void ShareChain::createGenesisShare() {
-    genesisShare_ = new Share(0, 0, 0, std::vector<uint32_t>());
-    Vertex genesisVertex = boost::add_vertex({genesisShare_}, graph_);
-    shareToVertex_[0] = genesisVertex;
-    ChainTips_[genesisShare_->getShareId()]=1;
-    totalShares_ = 1;
+    genesisShare = new Share(1, 0, ns3::Seconds(0), std::vector<uint32_t>(), 0);
+    Vertex genesisVertex = boost::add_vertex({genesisShare}, graph);
+    shareToVertex[1] = genesisVertex;
+    ChainTips[genesisShare->getShareId()]=1;
+    totalShares = 1;
 }
 
 bool ShareChain::addShare(Share* share) {
     if (!share) return false;
-    if(max_share_timestamp < share->getTimestamp() ) return false;
+    if(max_share_timestamp < share->getTimestamp() ) {
+        return false;
+    }
     uint32_t shareId = share->getShareId();
-    if (shareToVertex_.find(shareId) != shareToVertex_.end()) return false; 
+    if (shareToVertex.find(shareId) != shareToVertex.end()) return false; 
     
     if (!validatePrevRefs(share)) {
-        pendingShares_[shareId] = share;
+        pendingShares[shareId] = share;
         return false;
     }
     
-    Vertex newVertex = boost::add_vertex({share}, graph_);
-    shareToVertex_[shareId] = newVertex;
-    totalShares_++;
-    
+    totalShares++;
+    Vertex newVertex = boost::add_vertex({share}, graph);
+    shareToVertex[shareId] = newVertex;
     for (uint32_t prevId : share->getPrevRefs()) {
-            if (shareToVertex_.find(prevId) != shareToVertex_.end()) {
-                Vertex prevVertex = shareToVertex_[prevId];
-                boost::add_edge(newVertex, prevVertex, graph_);
+            if (shareToVertex.find(prevId) != shareToVertex.end()) {
+                Vertex prevVertex = shareToVertex[prevId];
+                boost::add_edge(newVertex, prevVertex, graph);
             }
+
     }
-    
-    updateMainChain(share, newVertex);
+
+    updateChainTips(share, newVertex);
     processPendingShares();
     
     return true;
 }
 
 const std::unordered_map<uint32_t,uint32_t> ShareChain::getChainTips() const {
-    return ChainTips_;
+    return ChainTips;
 }
 
-size_t ShareChain::getOrphanCount() const {
-    uint32_t maxi=0;
-    for(std::pair<uint32_t,uint32_t> i : ChainTips_) maxi=std::max(maxi,i.second);
-    return  totalShares_- maxi;
+size_t ShareChain::getOrphanCount() {
+    uint32_t uncleBlocks = getUncleBlocks(); 
+    uint32_t mainchainblocks = MainChainLength();
+    return  totalShares - uncleBlocks - mainchainblocks; 
 }
 
 size_t ShareChain::getTotalShares() const {
-    return totalShares_;
+    return totalShares;
 }
-void ShareChain::setmaxtimestamp(time_t maxtime) {
+
+void ShareChain::setmaxtimestamp(ns3::Time maxtime) {
      max_share_timestamp = maxtime;
 }
 
 const std::unordered_map<uint32_t, ShareChain::Vertex>& ShareChain::getAllShareVertices() const {
-    return shareToVertex_;
+    return shareToVertex;
 }
 
 Share* ShareChain::getGenesisShare() const {
-    return genesisShare_;
+    return genesisShare;
 }
 
 uint32_t ShareChain::calculateSubtreeWeight(Vertex v) {
@@ -89,8 +97,8 @@ uint32_t ShareChain::calculateSubtreeWeight(Vertex v) {
         queue.pop();
         
         boost::graph_traits<ShareGraph>::out_edge_iterator ei, ei_end;
-        for (boost::tie(ei, ei_end) = boost::out_edges(current, graph_); ei != ei_end; ++ei) {
-            Vertex target = boost::target(*ei, graph_);
+        for (boost::tie(ei, ei_end) = boost::out_edges(current, graph); ei != ei_end; ++ei) {
+            Vertex target = boost::target(*ei, graph);
             if (visited.find(target) == visited.end()) {
                 visited.insert(target);
                 queue.push(target);
@@ -100,25 +108,76 @@ uint32_t ShareChain::calculateSubtreeWeight(Vertex v) {
     return visited.size();
 }
 
-void ShareChain::updateMainChain(Share* share, Vertex vertex) {
+void ShareChain::updateChainTips(Share* share, Vertex vertex) {
     int weight = calculateSubtreeWeight(vertex);
     for (uint32_t prevId : share->getPrevRefs()) {
-        if(ChainTips_.find(prevId)!=ChainTips_.end())
-        ChainTips_.erase(prevId);
+        if(ChainTips.find(prevId)!=ChainTips.end())
+        ChainTips.erase(prevId);
     }
-    ChainTips_[share->getShareId()] = weight;
+    ChainTips[share->getShareId()] = weight;
 }
 
 bool ShareChain::validatePrevRefs(const Share* share) const {
     if (!share) return false;
 
     for (uint32_t prevId : share->getPrevRefs()) {
-            if (shareToVertex_.find(prevId) == shareToVertex_.end()) {
+            if (shareToVertex.find(prevId) == shareToVertex.end()) {
                 return false; 
             }
     }
     
     return true;
+}
+
+uint32_t ShareChain::getBestTip() {
+    uint32_t max_weight=0;
+    uint32_t chosen_tip=0;
+    for(std::pair<uint32_t,uint32_t> i : ChainTips) {
+        if(max_weight < i.second) {
+            max_weight=i.second;
+            chosen_tip = i.first;
+        }
+    }
+    return chosen_tip;
+}
+
+uint32_t ShareChain::MainChainLength() {
+    uint32_t chosen_tip = getBestTip();
+    uint32_t chain_length=1;
+    Share* mainShare = graph[shareToVertex[chosen_tip]].share;
+    while(mainShare->getShareId()!=1){
+    uint32_t parentid = mainShare->getParentId();
+    chain_length +=1;
+    mainShare =  graph[shareToVertex[parentid]].share;
+    }
+    return chain_length;
+}
+
+std::vector<uint32_t> ShareChain::showchain() {
+    std::vector<uint32_t> ans;
+    uint32_t chosen_tip = getBestTip();
+    uint32_t chain_length=1;
+    Share* mainShare = graph[shareToVertex[chosen_tip]].share;
+    while(mainShare->getShareId()!=1){
+    ans.push_back(mainShare->getShareId());
+    uint32_t parentid = mainShare->getParentId();
+    chain_length +=1;
+    mainShare =  graph[shareToVertex[parentid]].share;
+    }
+    ans.push_back(1);
+    return ans;
+}
+
+uint32_t ShareChain::getUncleBlocks() {
+    uint32_t chosen_tip = getBestTip();
+    uint32_t UncleBlocks=0;
+    Share* mainShare = graph[shareToVertex[chosen_tip]].share;
+    while(mainShare->getShareId()!=1){
+    uint32_t parentid = mainShare->getParentId();
+    UncleBlocks +=(mainShare->getPrevRefs().size()-1);
+    mainShare =  graph[shareToVertex[parentid]].share;
+    }
+    return UncleBlocks;
 }
 
 void ShareChain::processPendingShares() {
@@ -127,7 +186,7 @@ void ShareChain::processPendingShares() {
     while (progress) {
         progress = false;
         processed.clear();
-        for (auto& pair : pendingShares_) {
+        for (auto& pair : pendingShares) {
             Share* pendingShare = pair.second;
             if (addShare(pendingShare)) {
                 processed.push_back(pair.first);
@@ -135,7 +194,8 @@ void ShareChain::processPendingShares() {
             }
         }
         for (uint32_t id : processed) {
-            pendingShares_.erase(id);
+            pendingShares.erase(id);
         }
     }
 }
+
