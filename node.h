@@ -30,15 +30,9 @@ class P2PoolNode : public Application
 
     P2PoolNode(uint32_t P2PoolNodeId,
                Ptr<NormalRandomVariable> shareGenTimeModel,
-               Ptr<RandomVariableStream> latencyModel,
                uint32_t maxTipsToReference,
-               time_t max_share_time);
+               ns3::Time max_share_time);
     virtual ~P2PoolNode();
-
-    // Set up TCP connections to peers
-    void SetupConnections(const std::vector<Ptr<P2PoolNode>>& peers,
-                          std::map<uint32_t, std::vector<Ipv4Address>>& nodeToAddresses,
-                          uint16_t port);
 
     // Get P2PoolNode ID
     uint32_t GetNodeId() const;
@@ -46,8 +40,7 @@ class P2PoolNode : public Application
     // Get local ShareChain
     ShareChain* GetShareChain() const;
 
-    // Start generating shares
-    void StartShareGeneration(double interval);
+    void AddPeerSocket(uint32_t peerId, Ptr<Socket> socket);
 
     // Stop generating shares
     void StopShareGeneration();
@@ -58,6 +51,12 @@ class P2PoolNode : public Application
     // Print chain stats
     void PrintChainStats() const;
 
+    // Handle received share from peer
+    void HandleReceivedShare(Ptr<Socket> socket);
+
+    // Schedule next share generation
+    void ScheduleNextShareGeneration();
+
   protected:
     virtual void StartApplication(void);
     virtual void StopApplication(void);
@@ -66,17 +65,11 @@ class P2PoolNode : public Application
     // Generate a new share and broadcast to all peers
     void GenerateAndBroadcastShare();
 
-    // Schedule next share generation
-    void ScheduleNextShareGeneration();
-
     // Broadcast a share to all peers
     void BroadcastShare(Share* share);
 
     // Send a share to a specific peer
-    void SendShareToPeer(Share* share, Address peerAddress);
-
-    // Handle received share from peer
-    void HandleReceivedShare(Ptr<Socket> socket);
+    void SendShareToPeer(Share* share, Ptr<Socket> socket);
 
     // New connection callback
     void ConnectionAcceptedCallback(Ptr<Socket> socket, const Address& address);
@@ -87,52 +80,45 @@ class P2PoolNode : public Application
     std::string SerializeShare(Share* share);
 
     void ConnectionSucceeded(Ptr<Socket> socket);
+
     void ConnectionFailed(Ptr<Socket> socket);
 
     // Deserialize share from network data
     Share* DeserializeShare(const std::string& data);
 
+    //Generates unique shareid when creating new shareId
     uint32_t GenerateUniqueShareId();
 
     // P2PoolNode ID
-    uint32_t m_nodeId;
-
-    void DoSetupConnections(const std::vector<Ptr<P2PoolNode>>& peers,
-                            std::map<uint32_t, std::vector<Ipv4Address>>& nodeToAddresses,
-                            uint16_t port);
+    uint32_t nodeId;
 
     // Local sharechain
-    ShareChain* m_shareChain;
+    ShareChain* shareChain;
 
     // Maximum tips to reference when creating a share
-    uint32_t m_maxTipsToReference;
+    uint32_t maxTipsToReference;
 
     // Random variable for share generation times
-    Ptr<NormalRandomVariable> m_shareGenTimeModel;
-
-    // Latency model for this P2PoolNode's communication
-    Ptr<RandomVariableStream> m_latencyModel;
+    Ptr<NormalRandomVariable> shareGenTimeModel;
 
     // TCP listening socket
-    Ptr<Socket> m_socket;
+    Ptr<Socket> socket;
 
-    // Map of connected peers (socket -> address)
-    std::map<Address, Ptr<Socket>> m_peerSockets;
+    // Map of connected peers (nodeID -> socket)
+    std::unordered_map<uint32_t, Ptr<Socket>> peerSockets;
 
     // Event ID for next share generation
-    EventId m_nextShareEvent;
+    EventId nextShareEvent;
+
+    std::unordered_set<uint32_t> existingShares;
 
     // Running status
-    bool m_running;
-
-    // Latest share ID
-    uint64_t m_nextShareId;
-
+    bool running;
     // maximum time_stamp a share can i have for this simulation
-    time_t maxTime;
+    ns3::Time maxTime;
 
     // Statistics
-    uint32_t m_sharesCreated;
-    uint32_t m_sharesReceived;
-    uint32_t m_sharesSent;
+    uint32_t sharesCreated;
+    uint32_t sharesReceived;
+    uint32_t sharesSent;
 };

@@ -2,28 +2,29 @@
 #include <vector>
 #include <ctime>
 #include <cstdint>
+#include "ns3/simulator.h"
 
-Share::Share(uint64_t shareId, uint32_t senderId, time_t timestamp, 
+Share::Share(uint64_t shareId, uint32_t senderId, ns3::Time timestamp, 
     const std::vector<uint32_t>& prevShares, uint32_t parId)
-: shareId_(shareId), senderId_(senderId), timestamp_(timestamp), prevShares_(prevShares) , parentId(parId) {}
+: shareId(shareId), senderId(senderId), timestamp(timestamp), prevShares(prevShares) , parentId(parId) {}
 
 uint32_t Share::getSenderId() const {
-    return senderId_;
+    return senderId;
 }
 
 uint32_t Share::getShareId() const {
-    return shareId_;
+    return shareId;
 }
 
 const std::vector<uint32_t>& Share::getPrevRefs() const {
-    return prevShares_;
+    return prevShares;
 }
-time_t Share::getTimestamp() const{
-    return timestamp_;
+ns3::Time Share::getTimestamp() const{
+    return timestamp;
 }
 
 void Share::addPrevRef(uint32_t shareid) {
-        prevShares_.push_back(shareid);
+        prevShares.push_back(shareid);
 }
 
 uint32_t Share::getParentId() const {

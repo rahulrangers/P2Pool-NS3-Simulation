@@ -4,6 +4,7 @@
 #include <vector>
 #include <ctime>
 #include <cstdint>
+#include "ns3/simulator.h"
 
 /**
  * Class to represent a Share in the P2Pool network
@@ -16,7 +17,7 @@ public:
      * @param timestamp 
      * @param prevShares 
      */
-    Share(uint64_t shareId, uint32_t senderId, time_t timestamp, 
+    Share(uint64_t shareId, uint32_t senderId, ns3::Time timestamp, 
           const std::vector<uint32_t>& prevShares,uint32_t parentId);
 
     /**
@@ -32,7 +33,7 @@ public:
     /**
      * Returns the timestamp of when this share was created.
      */
-    time_t getTimestamp() const;
+    ns3::Time getTimestamp() const;
 
     /**
      * Returns the vector of previous shares (i.e., references to other shares).
@@ -48,7 +49,7 @@ public:
      * Less-than comparison operator based on timestamp.
      */
     bool operator<(const Share& other) const {
-        return timestamp_ < other.timestamp_;
+        return timestamp < other.timestamp;
     }
 
     /**
@@ -57,10 +58,10 @@ public:
     uint32_t getParentId() const;
     
 private:
-    uint32_t shareId_;                
-    uint32_t senderId_;               
-    time_t timestamp_;                
-    std::vector<uint32_t> prevShares_;   
+    uint32_t shareId;                
+    uint32_t senderId;               
+    ns3::Time timestamp;                
+    std::vector<uint32_t> prevShares;   
     uint32_t parentId;
 };
 

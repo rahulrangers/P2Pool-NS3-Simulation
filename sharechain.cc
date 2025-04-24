@@ -1,47 +1,54 @@
 #include <iostream>
 #include "sharechain.h"
-#include <boost/graph/breadth_first_search.hpp>
-#include <boost/graph/dijkstra_shortest_paths.hpp>
 #include <algorithm>
 #include <queue>
+#include "ns3/simulator.h"
+#include "ns3/log.h"
+#include <boost/graph/graphviz.hpp>
 #include <unordered_set>
 #include <limits>
+#include <filesystem> 
+namespace fs = std::filesystem;
 
-ShareChain::ShareChain(time_t max_time) 
-    : totalShares_(0), genesisShare_(nullptr), max_share_timestamp(max_time) {
+NS_LOG_COMPONENT_DEFINE("ShareChain");
+
+ShareChain::ShareChain(ns3::Time max_time) 
+    : totalShares(0), genesisShare(nullptr), max_share_timestamp(max_time) {
     createGenesisShare();
 }
 
 void ShareChain::createGenesisShare() {
-    genesisShare_ = new Share(1, 0, 0, std::vector<uint32_t>(),0);
-    Vertex genesisVertex = boost::add_vertex({genesisShare_}, graph_);
-    shareToVertex_[1] = genesisVertex;
-    ChainTips[genesisShare_->getShareId()]=1;
-    totalShares_ = 1;
+    genesisShare = new Share(1, 0, ns3::Seconds(0), std::vector<uint32_t>(), 0);
+    Vertex genesisVertex = boost::add_vertex({genesisShare}, graph);
+    shareToVertex[1] = genesisVertex;
+    ChainTips[genesisShare->getShareId()]=1;
+    totalShares = 1;
 }
 
 bool ShareChain::addShare(Share* share) {
     if (!share) return false;
-    if(max_share_timestamp < share->getTimestamp() ) return false;
+    if(max_share_timestamp < share->getTimestamp() ) {
+        return false;
+    }
     uint32_t shareId = share->getShareId();
-    if (shareToVertex_.find(shareId) != shareToVertex_.end()) return false; 
+    if (shareToVertex.find(shareId) != shareToVertex.end()) return false; 
     
     if (!validatePrevRefs(share)) {
         pendingShares[shareId] = share;
         return false;
     }
     
-    totalShares_++;
-    Vertex newVertex = boost::add_vertex({share}, graph_);
-    shareToVertex_[shareId] = newVertex;
-    
+    totalShares++;
+    Vertex newVertex = boost::add_vertex({share}, graph);
+    shareToVertex[shareId] = newVertex;
     for (uint32_t prevId : share->getPrevRefs()) {
-            if (shareToVertex_.find(prevId) != shareToVertex_.end()) {
-                Vertex prevVertex = shareToVertex_[prevId];
-                boost::add_edge(newVertex, prevVertex, graph_);
+            if (shareToVertex.find(prevId) != shareToVertex.end()) {
+                Vertex prevVertex = shareToVertex[prevId];
+                boost::add_edge(newVertex, prevVertex, graph);
             }
+
     }
-    
+
     updateChainTips(share, newVertex);
     processPendingShares();
     
@@ -55,23 +62,23 @@ const std::unordered_map<uint32_t,uint32_t> ShareChain::getChainTips() const {
 size_t ShareChain::getOrphanCount() {
     uint32_t uncleBlocks = getUncleBlocks(); 
     uint32_t mainchainblocks = MainChainLength();
-    return  totalShares_ - uncleBlocks - mainchainblocks; 
+    return  totalShares - uncleBlocks - mainchainblocks; 
 }
 
 size_t ShareChain::getTotalShares() const {
-    return totalShares_;
+    return totalShares;
 }
 
-void ShareChain::setmaxtimestamp(time_t maxtime) {
+void ShareChain::setmaxtimestamp(ns3::Time maxtime) {
      max_share_timestamp = maxtime;
 }
 
 const std::unordered_map<uint32_t, ShareChain::Vertex>& ShareChain::getAllShareVertices() const {
-    return shareToVertex_;
+    return shareToVertex;
 }
 
 Share* ShareChain::getGenesisShare() const {
-    return genesisShare_;
+    return genesisShare;
 }
 
 uint32_t ShareChain::calculateSubtreeWeight(Vertex v) {
@@ -90,8 +97,8 @@ uint32_t ShareChain::calculateSubtreeWeight(Vertex v) {
         queue.pop();
         
         boost::graph_traits<ShareGraph>::out_edge_iterator ei, ei_end;
-        for (boost::tie(ei, ei_end) = boost::out_edges(current, graph_); ei != ei_end; ++ei) {
-            Vertex target = boost::target(*ei, graph_);
+        for (boost::tie(ei, ei_end) = boost::out_edges(current, graph); ei != ei_end; ++ei) {
+            Vertex target = boost::target(*ei, graph);
             if (visited.find(target) == visited.end()) {
                 visited.insert(target);
                 queue.push(target);
@@ -114,7 +121,7 @@ bool ShareChain::validatePrevRefs(const Share* share) const {
     if (!share) return false;
 
     for (uint32_t prevId : share->getPrevRefs()) {
-            if (shareToVertex_.find(prevId) == shareToVertex_.end()) {
+            if (shareToVertex.find(prevId) == shareToVertex.end()) {
                 return false; 
             }
     }
@@ -137,24 +144,38 @@ uint32_t ShareChain::getBestTip() {
 uint32_t ShareChain::MainChainLength() {
     uint32_t chosen_tip = getBestTip();
     uint32_t chain_length=1;
-    Share* mainShare = graph_[shareToVertex_[chosen_tip]].share;
+    Share* mainShare = graph[shareToVertex[chosen_tip]].share;
     while(mainShare->getShareId()!=1){
     uint32_t parentid = mainShare->getParentId();
     chain_length +=1;
-    mainShare =  graph_[shareToVertex_[parentid]].share;
+    mainShare =  graph[shareToVertex[parentid]].share;
     }
     return chain_length;
 }
 
+std::vector<uint32_t> ShareChain::showchain() {
+    std::vector<uint32_t> ans;
+    uint32_t chosen_tip = getBestTip();
+    uint32_t chain_length=1;
+    Share* mainShare = graph[shareToVertex[chosen_tip]].share;
+    while(mainShare->getShareId()!=1){
+    ans.push_back(mainShare->getShareId());
+    uint32_t parentid = mainShare->getParentId();
+    chain_length +=1;
+    mainShare =  graph[shareToVertex[parentid]].share;
+    }
+    ans.push_back(1);
+    return ans;
+}
 
 uint32_t ShareChain::getUncleBlocks() {
     uint32_t chosen_tip = getBestTip();
     uint32_t UncleBlocks=0;
-    Share* mainShare = graph_[shareToVertex_[chosen_tip]].share;
+    Share* mainShare = graph[shareToVertex[chosen_tip]].share;
     while(mainShare->getShareId()!=1){
     uint32_t parentid = mainShare->getParentId();
     UncleBlocks +=(mainShare->getPrevRefs().size()-1);
-    mainShare =  graph_[shareToVertex_[parentid]].share;
+    mainShare =  graph[shareToVertex[parentid]].share;
     }
     return UncleBlocks;
 }
@@ -177,3 +198,4 @@ void ShareChain::processPendingShares() {
         }
     }
 }
+
