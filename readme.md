@@ -106,7 +106,7 @@ The project uses NS-3 for network simulation, including:
 To run the simulation:
 
 ```bash
-./ns3 --run "scratch/p2pool/main.cc"
+./ns3 run scratch/p2pool/main.cc
 ```
 
 ### Configuration Parameters
